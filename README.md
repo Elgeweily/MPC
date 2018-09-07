@@ -1,108 +1,100 @@
-# CarND-Controls-MPC
-Self-Driving Car Engineer Nanodegree Program
 
+## Model Description
+
+`state` vector, which holds the current state of the vehicle, and it consists of the below six values:
+ * x: x component of the vehicle current position
+ * y: y component of the vehicle current position
+ * psi: current heading (orientation) angle of the vehicle in radians measured anticlockwise from the global x-axis
+ * v: current velocity of the vehicle
+ * cte: cross track error approximated as the distance between the desired path and
+ * the vehicle along the vehicle's y-axis (horizontal to the vehicle)
+ * epsi: orientation angle error
+
+`vars` vector which holds the current and future values of the state and
+actuation variables as one long sequential vector, as shown below:
+ 
+if the number of timesteps N = 10, then the "vars" vector will look like this:
+ 
+vars[0], ..., vars[9] -> x<sub>1</sub>, ...,x<sub>10</sub>  
+
+vars[10], ..., vars[19] -> y<sub>1</sub>, ...,y<sub>10</sub>  
+
+vars[20], ..., vars[29] -> ψ<sub>1</sub>, ...,ψ<sub>10</sub>  
+
+vars[30], ..., vars[39] -> v<sub>1</sub>, ...,v<sub>10</sub>  
+
+vars[40], ..., vars[49] -> cte<sub>1</sub>, ...,cte<sub>10</sub>  
+
+vars[50], ..., vars[59] -> epsi<sub>1</sub>, ...,epsi<sub>10</sub>  
+
+vars[60], ..., vars[69] -> δ<sub>1</sub>, ...,δ<sub>10</sub>  
+
+vars[70], ..., vars[79] -> a<sub>1</sub>, ...,a<sub>10</sub>  
+
+`fg` vector, which holds the cost function as it's first value (fg[0]), and it holds each of the state variables initial value:
+
+```C++
+fg[1 + x_start] = vars[x_start];
+fg[1 + y_start] = vars[y_start];
+fg[1 + psi_start] = vars[psi_start];
+fg[1 + v_start] = vars[v_start];
+fg[1 + cte_start] = vars[cte_start];
+fg[1 + epsi_start] = vars[epsi_start];
+```
+
+and each of the state variables subsequent values, based on the model equations (constraints):
+
+```C++
+for (int t = 1; t < N; t++) {
+  ...
+  ...
+  ...
+  fg[1 + x_start + t] = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
+  fg[1 + y_start + t] = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
+  fg[1 + psi_start + t] = psi1 - (psi0 + v0 * delta0 / Lf * dt);
+  fg[1 + v_start + t] = v1 - (v0 + a0 * dt);
+  fg[1 + cte_start + t] =
+      cte1 - ((f0 - y0) + (v0 * CppAD::sin(epsi0) * dt));
+  fg[1 + epsi_start + t] =
+      epsi1 - ((psi0 - psides0) + v0 * delta0 / Lf * dt);
+}
+```
+
+ 
 ---
 
-## Dependencies
+The Ipopt solver uses the `fg` and `vars` vector, along with the defined boundaries for each of the variables and the constraints, to calculate the solution.
 
-* cmake >= 3.5
- * All OSes: [click here for installation instructions](https://cmake.org/install/)
-* make >= 4.1(mac, linux), 3.81(Windows)
-  * Linux: make is installed by default on most Linux distros
-  * Mac: [install Xcode command line tools to get make](https://developer.apple.com/xcode/features/)
-  * Windows: [Click here for installation instructions](http://gnuwin32.sourceforge.net/packages/make.htm)
-* gcc/g++ >= 5.4
-  * Linux: gcc / g++ is installed by default on most Linux distros
-  * Mac: same deal as make - [install Xcode command line tools]((https://developer.apple.com/xcode/features/)
-  * Windows: recommend using [MinGW](http://www.mingw.org/)
-* [uWebSockets](https://github.com/uWebSockets/uWebSockets)
-  * Run either `install-mac.sh` or `install-ubuntu.sh`.
-  * If you install from source, checkout to commit `e94b6e1`, i.e.
-    ```
-    git clone https://github.com/uWebSockets/uWebSockets
-    cd uWebSockets
-    git checkout e94b6e1
-    ```
-    Some function signatures have changed in v0.14.x. See [this PR](https://github.com/udacity/CarND-MPC-Project/pull/3) for more details.
+We extract from the solution only the next steering (δ) and acceleration (a) values, and return them to the simulator,
+which are what we need for the next actuation, and discard the rest of the actuation values,
+which are needed to compute the solution, but we don't need them to execute the next actuation,
+also we extract all the future values for x and y, to visualize the predicted path that the vehicle will follow.
 
-* **Ipopt and CppAD:** Please refer to [this document](https://github.com/udacity/CarND-MPC-Project/blob/master/install_Ipopt_CppAD.md) for installation instructions.
-* [Eigen](http://eigen.tuxfamily.org/index.php?title=Main_Page). This is already part of the repo so you shouldn't have to worry about it.
-* Simulator. You can download these from the [releases tab](https://github.com/udacity/self-driving-car-sim/releases).
-* Not a dependency but read the [DATA.md](./DATA.md) for a description of the data sent back from the simulator.
+## Setting (N & dt)
 
+I have chosen the values of N (number of timesteps) & dt (duration of timesteps) through trial and error, I've tried setting N to 20,
+which works reasonably well, but it is very computationally intensive as it has to predict too many values into the future,
+also as we predict more into the future, the path becomes more complicated, and a third degree polynomial will have trouble
+following it accurately, I have tried setting it to 5, which seems not to have enough values to predict a correct path,
+so it behaves erratically, thus I've settled for a value of 10.
 
-## Basic Build Instructions
+for dt, I have tried 0.05, which works well but causes the vehicle to
+vibrate quite a lot around the desired path, which seems to be because the actuation variables
+are updated more often than they should be, and I've tried 0.4 but it doesn't accurately follow the desired path,
+as the predicted path seems to have lower resolution than the desired path, so I've settled for 0.1 which worked quite well.
 
-1. Clone this repo.
-2. Make a build directory: `mkdir build && cd build`
-3. Compile: `cmake .. && make`
-4. Run it: `./mpc`.
+## Preprocessing waypoints
 
-## Tips
+Initially the waypoints are shifted to the vehicle position, and rotated to the vehicle orientation, to transform them
+from the global coordinates to the vehicle coordinates, which helps simplify the use of the `polyfit()` function, and 
+consequentially the first 3 values of the current state (x, y, ψ) becomes zero, since we are using the vehicle coordinates
+as our reference, which simplifies the calculation of cte and epsi.
 
-1. It's recommended to test the MPC on basic examples to see if your implementation behaves as desired. One possible example
-is the vehicle starting offset of a straight line (reference). If the MPC implementation is correct, after some number of timesteps
-(not too many) it should find and track the reference line.
-2. The `lake_track_waypoints.csv` file has the waypoints of the lake track. You could use this to fit polynomials and points and see of how well your model tracks curve. NOTE: This file might be not completely in sync with the simulator so your solution should NOT depend on it.
-3. For visualization this C++ [matplotlib wrapper](https://github.com/lava/matplotlib-cpp) could be helpful.)
-4.  Tips for setting up your environment are available [here](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/0949fca6-b379-42af-a919-ee50aa304e6a/lessons/f758c44c-5e40-4e01-93b5-1a82aa4e044f/concepts/23d376c7-0195-4276-bdf0-e02f1f3c665d)
-5. **VM Latency:** Some students have reported differences in behavior using VM's ostensibly a result of latency.  Please let us know if issues arise as a result of a VM environment.
+## Managing Latency (100ms)
 
-## Editor Settings
+I've managed to solve the latency problem, by using the model equations to correct for the delayed initial state,
+while setting dt in the equations to 0.1 (100ms), which outputs the state after 100ms, and then using that as the
+new corrected initial state, here we note that the equations require (delta0) and (a0),
+which are the current steering and acceleration values, so these were taken from the simulator in `main.cpp`, and passed
+as additional parameters through the `solve()` function, and then used in the equations.
 
-We've purposefully kept editor configuration files out of this repo in order to
-keep it as simple and environment agnostic as possible. However, we recommend
-using the following settings:
-
-* indent using spaces
-* set tab width to 2 spaces (keeps the matrices in source code aligned)
-
-## Code Style
-
-Please (do your best to) stick to [Google's C++ style guide](https://google.github.io/styleguide/cppguide.html).
-
-## Project Instructions and Rubric
-
-Note: regardless of the changes you make, your project must be buildable using
-cmake and make!
-
-More information is only accessible by people who are already enrolled in Term 2
-of CarND. If you are enrolled, see [the project page](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/f1820894-8322-4bb3-81aa-b26b3c6dcbaf/lessons/b1ff3be0-c904-438e-aad3-2b5379f0e0c3/concepts/1a2255a0-e23c-44cf-8d41-39b8a3c8264a)
-for instructions and the project rubric.
-
-## Hints!
-
-* You don't have to follow this directory structure, but if you do, your work
-  will span all of the .cpp files here. Keep an eye out for TODOs.
-
-## Call for IDE Profiles Pull Requests
-
-Help your fellow students!
-
-We decided to create Makefiles with cmake to keep this project as platform
-agnostic as possible. Similarly, we omitted IDE profiles in order to we ensure
-that students don't feel pressured to use one IDE or another.
-
-However! I'd love to help people get up and running with their IDEs of choice.
-If you've created a profile for an IDE that you think other students would
-appreciate, we'd love to have you add the requisite profile files and
-instructions to ide_profiles/. For example if you wanted to add a VS Code
-profile, you'd add:
-
-* /ide_profiles/vscode/.vscode
-* /ide_profiles/vscode/README.md
-
-The README should explain what the profile does, how to take advantage of it,
-and how to install it.
-
-Frankly, I've never been involved in a project with multiple IDE profiles
-before. I believe the best way to handle this would be to keep them out of the
-repo root to avoid clutter. My expectation is that most profiles will include
-instructions to copy files to a new location to get picked up by the IDE, but
-that's just a guess.
-
-One last note here: regardless of the IDE used, every submitted project must
-still be compilable with cmake and make./
-
-## How to write a README
-A well written README file can enhance your project and portfolio.  Develop your abilities to create professional README files by completing [this free course](https://www.udacity.com/course/writing-readmes--ud777).
